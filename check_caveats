@@ -10,8 +10,10 @@
 : ${CFG_DIR=/etc/microcode_ctl/ucode_with_caveats}
 
 usage() {
-	echo 'Usage: check_caveats [-e] [-k TARGET_KVER] [-c CONFIG] [-m] [-v]'
+	echo 'Usage: check_caveats [-d] [-e] [-k TARGET_KVER] [-c CONFIG]'
+	echo '                     [-m] [-v]'
 	echo
+	echo '   -d - enables disclaimer printing mode'
 	echo '   -e - check for early microcode load possibility (instead of'
 	echo '        late microcode load)'
 	echo '   -k - target version to check against, $(uname -r) is used'
@@ -130,6 +132,132 @@ check_kver()
 	return 1
 }
 
+# It is needed for SKX[1] for which different product segments
+# are differentiated by a value in the CAPID0 field of PCU registers
+# device[2].
+# [1] https://github.com/intel/Intel-Linux-Processor-Microcode-Data-Files/issues/21
+# [2] https://www.intel.com/content/dam/www/public/us/en/documents/specification-updates/xeon-scalable-spec-update.pdf#page=13
+#
+# $1 - params in config file, space-spearated, in key=value form:
+#   domain=* - PCI domain, '*' or number
+#   bus=* - PCI bus, '*' or number
+#   device=* - PCI device, '*' or number
+#   function=* - PCI function, '*' or number
+#   vid= - PCI vendor ID, empty or number
+#   did= - PCI device ID, empty or number
+#   offset=0 - offset in configuration space
+#   size=4 - field size
+#   mask=0 - mask applied to the data read
+#   val=0 - comma-separated list of possible values
+#   mode=success-any [ success-ail, fail-any, fail-all ] - matching mode:
+#     success-any: Returns 0 if there was at least one match, otherwise 1.
+#     success-all: Returns 0 if there was at least one device checked and all
+#                  the checked devices have matches, otherwise 1.
+#     fail-any:    Returns 1 if there was at least one match, otherwise 0.
+#     fail-all:    Returns 1 if there was at least one device checked and all
+#                  the checked devices have matches, otherwise 0.
+# $2 - whether model filter is engaged (if it is not '1', just return the result
+#      based on "mode" value that assumes that there were 0 checks/0 matches).
+check_pci_config_val()
+{
+	local domain='*' bus='*' device='*' func='*' vid= did=
+	local offset=0 size=4 mask=0 val=0 mode=success-any
+	local checked=0 matched=0 path=''
+	local dev_path dev_vid dev_did dev_val
+	local opts="${1:-}"
+	local match_model="${2:0}"
+
+	set -- $1
+	while [ "$#" -gt 0 ]; do
+		[ "x${1#domain=}" = "x${1}" ] || domain="${1#domain=}"
+		[ "x${1#bus=}" = "x${1}" ] || bus="${1#bus=}"
+		[ "x${1#device=}" = "x${1}" ] || device="${1#device=}"
+		[ "x${1#function=}" = "x${1}" ] || func="${1#function=}"
+		[ "x${1#vid=}" = "x${1}" ] || vid="${1#vid=}"
+		[ "x${1#did=}" = "x${1}" ] || did="${1#did=}"
+		[ "x${1#offset=}" = "x${1}" ] || offset="${1#offset=}"
+		[ "x${1#size=}" = "x${1}" ] || size="${1#size=}"
+		[ "x${1#mask=}" = "x${1}" ] || mask="${1#mask=}"
+		[ "x${1#val=}" = "x${1}" ] || val="${1#val=}"
+		[ "x${1#mode=}" = "x${1}" ] || mode="${1#mode=}"
+
+		shift
+	done
+
+	path="$domain"
+	if [ "x$bus" = 'x*' ]; then
+		path="$path:$bus";
+	else
+		path=$(printf '%s:%02x' "$path" "$bus")
+	fi
+	if [ "x$device" = 'x*' ]; then
+		path="$path:$device";
+	else
+		path=$(printf '%s:%02x' "$path" "$device")
+	fi
+	if [ "x$func" = 'x*' ]; then
+		path="$path.$func";
+	else
+		path=$(printf '%s.%01x' "$path" "$func")
+	fi
+
+	# Normalise VID, DID
+	[ -n "$vid" ] || vid="$(printf '0x%04x' "$vid")"
+	[ -n "$did" ] || did="$(printf '0x%04x' "$did")"
+
+	( [ 1 != "$match_model" ] \
+	  || /usr/bin/find /sys/bus/pci/devices/ -maxdepth 1 -name "$path" \
+	  || : ) | (
+		while read -r dev_path; do
+			# Filter VID, DID
+			if [ -n "$vid" ]; then
+				dev_vid=$(/bin/cat "$dev_path/vendor")
+				[ "x$vid" = "x$dev_vid" ] || continue
+			fi
+			if [ -n "$did" ]; then
+				dev_did=$(/bin/cat "$dev_path/device")
+				[ "x$did" = "x$dev_did" ] || continue
+			fi
+
+			checked="$((checked + 1))"
+
+			dev_val="$(/usr/bin/od -j "$offset" -N "$size" -A n \
+					       -t "u$size" "$dev_path/config")"
+
+			val_rest="${val}"
+			while :; do
+				cur_val="${val_rest%%,*}"
+				if [ "$((dev_val & mask))" = "$((cur_val & mask))" ]
+				then
+					matched="$((matched + 1))"
+					break
+				fi
+				[ "x${val_rest}" != "x${val_rest#*,}" ] || break
+				val_rest="${val_rest#*,}"
+			done
+
+			case "$mode" in
+			success-any) [ "$matched" -eq 0 ] || { echo 0; exit; } ;;
+			success-all) [ "$matched" -eq "$checked" ] || { echo 1; exit; } ;;
+			fail-any)    [ "$matched" -eq 0 ] || { echo 1; exit; } ;;
+			fail-all)    [ "$matched" -eq "$checked" ] || { echo 0; exit; } ;;
+			*)           echo 2; exit;;
+			esac
+		done
+
+		debug "PCI config value check ($opts): checked $checked," \
+		      "matched $matched (model check is set to $match_model)"
+
+		case "$mode" in
+		success-any) if [ "$matched" -eq 0 ]; then echo 1; else echo 0; fi ;;
+		success-all) if [ "$matched" -gt 0 -a "$matched" -eq "$checked" ]; then echo 0; else echo 1; fi ;;
+		fail-any)    if [ "$matched" -eq 0 ]; then echo 0; else echo 1; fi  ;;
+		fail-all)    if [ "$matched" -gt 0 -a "$matched" -eq "$checked" ]; then echo 1; else echo 0; fi ;;
+		*)           echo 2; exit;;
+		esac
+	)
+}
+
 # Provides model in format "VENDOR_ID FAMILY-MODEL-STEPPING"
 #
 # We check only the first processor as we don't expect non-symmetrical setups
@@ -155,6 +283,18 @@ get_vendor_id()
 	/bin/sed -rn '1,/^$/s/^vendor_id[[:space:]]*: (.*)$/\1/p' /proc/cpuinfo
 }
 
+get_mc_path()
+{
+	case "$1" in
+	GenuineIntel)
+		echo "intel-ucode/$2"
+		;;
+	AuthenticAMD)
+		echo "amd-ucode/$2"
+		;;
+	esac
+}
+
 get_mc_ver()
 {
 	/bin/sed -rn '1,/^$/s/^microcode[[:space:]]*: (.*)$/\1/p' /proc/cpuinfo
@@ -166,6 +306,9 @@ fail()
 
 	fail_cfgs="$fail_cfgs $cfg"
 	fail_paths="$fail_paths $cfg_path"
+
+	[ 0 -eq "$print_disclaimers" ] || [ ! -e "${dir}/disclaimer" ] \
+		|| /bin/cat "${dir}/disclaimer"
 }
 
 #check_kver "$@"
@@ -176,11 +319,16 @@ configs=
 kver=$(/bin/uname -r)
 verbose=0
 early_check=0
+print_disclaimers=0
 
 ret=0
 
-while getopts "ek:c:mv" opt; do
+while getopts "dek:c:mv" opt; do
 	case "${opt}" in
+	d)
+		print_disclaimers=1
+		early_check=2
+		;;
 	e)
 		early_check=1
 		;;
@@ -203,7 +351,7 @@ while getopts "ek:c:mv" opt; do
 	esac
 done
 
-: ${configs:=$(find "${MC_CAVEATS_DATA_DIR}" -maxdepth 1 -mindepth 1 -type d -printf "%f\n")}
+: "${configs:=$(find "${MC_CAVEATS_DATA_DIR}" -maxdepth 1 -mindepth 1 -type d -printf "%f\n")}"
 
 cpu_model=$(get_model_string)
 cpu_model_name=$(get_model_name)
@@ -251,6 +399,7 @@ for cfg in $(echo "${configs}"); do
 	cfg_blacklist=
 	cfg_mc_min_ver_late=
 	cfg_disable=
+	cfg_pci=
 
 	while read -r key value; do
 		case "$key" in
@@ -277,7 +426,17 @@ for cfg in $(echo "${configs}"); do
 			;;
 		blacklist)
 			cfg_blacklist=1
-			break
+			;;
+		pci_config_val)
+			cfg_pci="$cfg_pci
+				$value"
+			;;
+		'#'*|'')
+			continue
+			;;
+		*)
+			debug "Unknown key '$key' (value '$value') in config" \
+			      "'$cfg'"
 			;;
 		esac
 	done < "${dir}/config"
@@ -359,6 +518,30 @@ for cfg in $(echo "${configs}"); do
 		}
 	fi
 
+	# Check paths if model filter is enabled
+	if [ 1 -eq "$match_model" -a  -n "$cfg_path" ]; then
+		cpu_mc_path="$MC_CAVEATS_DATA_DIR/$cfg/$(get_mc_path \
+			"$cpu_vendor" "${cpu_model#* }")"
+		cfg_mc_present=0
+
+		for p in $(printf "%s" "$cfg_path"); do
+			{ /usr/bin/find "$MC_CAVEATS_DATA_DIR/$cfg" \
+				-path "$MC_CAVEATS_DATA_DIR/$cfg/$p" -print0;
+			  /bin/true; } \
+			    | /bin/grep -zFxq "$cpu_mc_path" \
+			    || continue
+
+			cfg_mc_present=1
+			break
+		done
+
+		[ 1 = "$cfg_mc_present" ] || {
+			debug "No matching microcode files in '$cfg_path'" \
+			      "for CPU model '$cpu_model', skipping"
+			continue
+		}
+	fi
+
 	# Check vendor if model filter is enabled
 	if [ 1 -eq "$match_model" -a  -n "$cfg_vendor" ]; then
 		[ "x$cpu_vendor" = "x$cfg_vendor" ] || {
@@ -434,9 +617,33 @@ for cfg in $(echo "${configs}"); do
 		}
 	fi
 
+	# Check PCI devices if model filter is enabled
+	# Note that the model filter check is done inside check_pci_config_val
+	# based on the 'mode=' parameter.
+	if [ -n "$cfg_pci" ]; then
+		pci_line="$(printf "%s\n" "$cfg_pci" | while read -r pci_line; do
+				[ -n "$pci_line" ] || continue
+				pci_res=$(check_pci_config_val "$pci_line" \
+							       "$match_model")
+				[ 0 != "$pci_res" ] || continue
+				echo "$pci_res $pci_line"
+				break
+			done
+			echo "0 ")"
+
+		[ -z "${pci_line#* }" ] || {
+			debug "PCI configuration word check '${pci_line#* }'" \
+			      "failed (with return code ${pci_line%% *})"
+			fail
+			continue
+		}
+	fi
+
 	ok_cfgs="$ok_cfgs $cfg"
 	ok_paths="$ok_paths $cfg_path"
 done
+
+[ 0 -eq "$print_disclaimers" ] || exit 0
 
 echo "cfgs$ret_cfgs"
 echo "skip_cfgs$skip_cfgs"

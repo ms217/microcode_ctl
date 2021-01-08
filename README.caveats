@@ -146,6 +146,49 @@ separated by white space.  Currently, the following options are supported:
    one model name per line. The model name of the running CPU (as reported
    in /proc/cpuinfo) is compared against the names in the provided list, and,
    if there is a match, caveat check fails.
+ * "pci_config_val" performs check for specific values in selected parts
+   of configuration space of specified PCI devices.  If "-m" option
+   is not specified, then the actual check is skipped, and the check returns
+   result in accordance with the provided "mode" option (se below).  Check
+   arguments are a white-space-separated list of "key=value" pairs.
+   The following keys are supported:
+    * "domain" - PCI domain number, or "*" (an asterisk) for any domain.
+      Default is "*".
+    * "bus" - PCI bus number, or "*" (an asterisk) for any bus.  Default is "*".
+    * "device" - PCI device number, or "*" (an asterisk) for any device.
+      Default is "*".
+    * "function" - PCI function number, or "*" (an asterisk) for any function.
+      Default is "*".
+    * "vid" - PCI vendor ID, or empty string for any vendor ID.  Default
+      is empty string.
+    * "did" - PCI device ID, or empty string for any device ID.  Default
+      is empty string.
+    * "offset" - offset in device's configuration space where the value resides.
+      Default is 0.
+    * "size" - field size.  Possible values are 1, 2, 4, or 8.  Default is 4.
+    * "mask" - mask applied to the values during the check.  Default is 0.
+    * "val" - comma-separated list of matching values.  Default is 0.
+    * "mode" - check mode, the way matches are interpreted:
+       * "success-any" - check succeeds if there was at least one match,
+         otherwise it fails.
+       * "success-all" - check succeeds if there was at least one device checked
+         and all the checked devices have matches, otherwise the check fails.
+       * "fail-any" - check fails if there was at least one match, otherwise
+         it succeeds.
+       * "fail-all" - check fails if there was at least one device checked
+         and all the checked devices have matches, otherwise the check succeeds.
+   An example of a check:
+       pci_config_val mode=success-all device=30 function=3 vid=0x8086 did=0x2083 offset=0x84 size=4 mask=0x38 val=0x38,0x18,0x8
+   It interprets 4 bytes at offset 0x84 of special files "config" under
+   directories that match glob pattern "/sys/bus/pci/devices/*:*:1e.3"
+   as an unsigned integer value, applies mask 0x38 (thus selecting bit 5..3
+   of it) and checks whether it is one of the values 0x38, 0x18, or 0x8 (0b111,
+   0b011, or 0b001 in bits 5..3, respectively); if there are such files,
+   and all the checked values in every checked file has matched at least one
+   of the aforementioned value, then the check is successful, otherwise
+   it fails (in accordance with "mode=success-all" semantics).  This check fails
+   if "-m" option is not specified.
+
 
 
 check_caveats script
@@ -310,12 +353,17 @@ series:
 Intel Sandy Bridge-E/EN/EP caveat
 ---------------------------------
 MDS-related microcode revision 0x718 for Intel Sandy Bridge-E/EN/EP
-(SNB-EP, family 6, model 45, stepping 7) may lead to system instability.
+(SNB-EP, family 6, model 45, stepping 7) may lead to system instability[1][2].
 In order to address this, this microcode update is not used and the previous
 microcode revision is provided instead by default; the microcode file, however,
 is still shipped as part of microcode_ctl package and can be used for performing
-a microcode update if it is enforced via the aforementioned overriddes. (See
-sections "check_caveats script" and "reload_microcode script" for details.)
+a microcode update if it is enforced via the aforementioned overrides. (See
+the sections "check_caveats script" and "reload_microcode script" for details.)
+
+[1] https://github.com/intel/Intel-Linux-Processor-Microcode-Data-Files/issues/15
+[2] https://access.redhat.com/solutions/4593951
+
+Caveat name: intel-06-2d-07
 
 Affected microcode: intel-ucode/06-2d-07.
 
@@ -324,14 +372,17 @@ Mitigation: previously published microcode revision 0x714 is used by default.
 
 Intel Skylake-SP/W/X caveat
 ---------------------------
-Microcode revision 0x2000065 for Intel Skylake Scalable Platform (SKL-SP/W/X,
-family 6, model 85, stepping 4) may lead to system instability.
-In order to address this, this microcode update is not used and the previous
-microcode revision is provided instead by default; the microcode file, however,
-is still shipped as part of microcode_ctl package and can be used for performing
-a microcode update if it is enforced via the aforementioned overrides.
-(See the sections "check_caveats script" and "reload_microcode script"
-for details.)
+Microcode revisions 0x2000065 and later for some CPU models that belong to
+Intel Skylake Scalable Platform (SKL-W/X, family 6, model 85, stepping 4,
+Workstation/HEDT segments) may lead to hangs during reboot[1].  In order
+to address this, by default these microcode updates are not used
+and the previous microcode revision is provided instead; the microcode file,
+however, is still shipped as part of microcode_ctl package and can be used
+for performing a microcode update if it is enforced via the aforementioned
+overrides. (See the sections "check_caveats script" and "reload_microcode
+script" for details.)
+
+[1] https://github.com/intel/Intel-Linux-Processor-Microcode-Data-Files/issues/21
 
 Caveat name: intel-06-55-04
 

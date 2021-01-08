@@ -1,9 +1,12 @@
-Intel Skulake Scalable Platform CPU models (SKL-SP/W/X, family 6, model 85,
-stepping 4) have reports of system hangs when revision 0x2000065 of microcode,
-that is included since microcode-20191112 update, is applied.  In order
-to address this, microcode update to this revision has been disabled,
+Intel Skulake Scalable Platform CPU models that belong to Workstation and HEDT
+(Basin Falls) segment (SKL-W/X, family 6, model 85, stepping 4) have reports
+of system hangs on reboot when revision 0x2000065 of microcode, that is included
+since microcode-20191112 update, is applied[1].  In order to address this,
+microcode update to this revision has been disabled by default on these systems,
 and the previously published microcode revision 0x2000064 is used by default
 for the OS-driven microcode update.
+
+[1] https://github.com/intel/Intel-Linux-Processor-Microcode-Data-Files/issues/21
 
 For the reference, SHA1 checksums of 06-55-04 microcode files containing
 microcode revisions in question are listed below:
