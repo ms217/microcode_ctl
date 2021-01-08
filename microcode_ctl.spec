@@ -1,9 +1,11 @@
-%define intel_ucode_version 20200602
+%define intel_ucode_version 20200609
+
+%define _pkgdocdir %{_docdir}/%{name}-%{version}
 
 Summary:        Tool to update x86/x86-64 CPU microcode.
 Name:           microcode_ctl
 Version:        1.17
-Release:        33.26%{?dist}
+Release:        33.29%{?dist}
 Epoch:          2
 Group:          System Environment/Base
 License:        GPLv2+
@@ -41,6 +43,18 @@ Source13:       06-2d-07_readme
 Source14:       https://github.com/intel/Intel-Linux-Processor-Microcode-Data-Files/raw/microcode-20190918/intel-ucode/06-55-04
 Source15:       06-55-04_config
 Source16:       06-55-04_readme
+
+# SKL-U/Y (CPUID 0x406e3) post-20200609 hangs
+# https://github.com/intel/Intel-Linux-Processor-Microcode-Data-Files/issues/31
+Source17:       https://github.com/intel/Intel-Linux-Processor-Microcode-Data-Files/raw/microcode-20200520/intel-ucode/06-4e-03
+Source18:       06-4e-03_config
+Source19:       06-4e-03_readme
+
+# SKL-H/S/Xeon E3 v5 (CPUID 0x506e3) post-20200609 possible hangs
+# https://github.com/intel/Intel-Linux-Processor-Microcode-Data-Files/issues/31#issuecomment-644885826
+Source20:       https://github.com/intel/Intel-Linux-Processor-Microcode-Data-Files/raw/microcode-20200520/intel-ucode/06-5e-03
+Source21:       06-5e-03_config
+Source22:       06-5e-03_readme
 
 Buildroot:      %{_tmppath}/%{name}-%{version}-root
 Requires(pre):  /sbin/chkconfig /sbin/service
@@ -80,10 +94,18 @@ cp "%{SOURCE11}" intel-ucode/
 mv intel-ucode/06-55-04 intel-ucode-with-caveats
 cp "%{SOURCE14}" intel-ucode/
 
+mv intel-ucode/06-4e-03 intel-ucode-with-caveats
+cp "%{SOURCE17}" intel-ucode/
+
+mv intel-ucode/06-5e-03 intel-ucode-with-caveats
+cp "%{SOURCE20}" intel-ucode/
+
 bash -efu %{SOURCE5} "intel-ucode" microcode.dat
-bash -efu %{SOURCE5} "intel-ucode-with-caveats/06-4f-01" microcode-06-4f-01.dat
 bash -efu %{SOURCE5} "intel-ucode-with-caveats/06-2d-07" microcode-06-2d-07.dat
+bash -efu %{SOURCE5} "intel-ucode-with-caveats/06-4e-03" microcode-06-4e-03.dat
+bash -efu %{SOURCE5} "intel-ucode-with-caveats/06-4f-01" microcode-06-4f-01.dat
 bash -efu %{SOURCE5} "intel-ucode-with-caveats/06-55-04" microcode-06-55-04.dat
+bash -efu %{SOURCE5} "intel-ucode-with-caveats/06-5e-03" microcode-06-5e-03.dat
 
 %install
 rm -rf %{buildroot}
@@ -92,11 +114,13 @@ mkdir -p %{buildroot}/lib/udev/rules.d
 mkdir -p %{buildroot}/usr/share/man/man{1,8}
 mkdir -p %{buildroot}%{_sysconfdir}/sysconfig
 mkdir -p %{buildroot}/lib/firmware/amd-ucode/
-mkdir -p %{buildroot}/usr/share/doc/microcode_ctl/
+mkdir -p %{buildroot}/%{_pkgdocdir}/caveats/
 mkdir -p %{buildroot}/usr/libexec/microcode_ctl/
-mkdir -p %{buildroot}/usr/share/microcode_ctl/ucode_with_caveats/intel-06-4f-01
 mkdir -p %{buildroot}/usr/share/microcode_ctl/ucode_with_caveats/intel-06-2d-07
+mkdir -p %{buildroot}/usr/share/microcode_ctl/ucode_with_caveats/intel-06-4e-03
+mkdir -p %{buildroot}/usr/share/microcode_ctl/ucode_with_caveats/intel-06-4f-01
 mkdir -p %{buildroot}/usr/share/microcode_ctl/ucode_with_caveats/intel-06-55-04
+mkdir -p %{buildroot}/usr/share/microcode_ctl/ucode_with_caveats/intel-06-5e-03
 
 make DESTDIR=%{buildroot} PREFIX=%{_prefix} \
      INSDIR=/sbin MANDIR=%{_mandir}/man8 RCDIR=%{_sysconfdir} install clean
@@ -105,14 +129,16 @@ rm -rf %{buildroot}/etc/*
 
 install -m 644 %{SOURCE1} %{buildroot}/lib/udev/rules.d/89-microcode.rules
 install -m 644 microcode.dat %{buildroot}/lib/firmware/microcode.dat
-install -m 644 microcode-06-4f-01.dat %{buildroot}/lib/firmware/microcode-06-4f-01.dat
 install -m 644 microcode-06-2d-07.dat %{buildroot}/lib/firmware/microcode-06-2d-07.dat
+install -m 644 microcode-06-4e-03.dat %{buildroot}/lib/firmware/microcode-06-4e-03.dat
+install -m 644 microcode-06-4f-01.dat %{buildroot}/lib/firmware/microcode-06-4f-01.dat
 install -m 644 microcode-06-55-04.dat %{buildroot}/lib/firmware/microcode-06-55-04.dat
-install -m 644 %{SOURCE10} README.caveats
+install -m 644 microcode-06-5e-03.dat %{buildroot}/lib/firmware/microcode-06-5e-03.dat
+install -m 644 %{SOURCE10} %{buildroot}/%{_pkgdocdir}/README.caveats
 
 # Provide Intel microcode license, as it requires
-install -m 644 license LICENSE.intel-ucode
-install -m 644 releasenote RELEASE_NOTES.intel-ucode
+install -m 644 license %{buildroot}/%{_pkgdocdir}/LICENSE.intel-ucode
+install -m 644 releasenote %{buildroot}/%{_pkgdocdir}/RELEASE_NOTES.intel-ucode
 
 install -m 755 %{SOURCE6} %{buildroot}/usr/libexec/microcode_ctl/check_caveats
 install -m 755 %{SOURCE7} %{buildroot}/usr/libexec/microcode_ctl/reload_microcode
@@ -126,7 +152,17 @@ install -m 644 %{SOURCE13} %{buildroot}/usr/share/microcode_ctl/ucode_with_cavea
 install -m 644 %{SOURCE15} %{buildroot}/usr/share/microcode_ctl/ucode_with_caveats/intel-06-55-04/config
 install -m 644 %{SOURCE16} %{buildroot}/usr/share/microcode_ctl/ucode_with_caveats/intel-06-55-04/readme
 
-install -m 644 amd-ucode-2018-05-24/LICENSE.amd-ucode LICENSE.amd-ucode
+install -m 644 %{SOURCE18} %{buildroot}/usr/share/microcode_ctl/ucode_with_caveats/intel-06-4e-03/config
+install -m 644 %{SOURCE19} %{buildroot}/usr/share/microcode_ctl/ucode_with_caveats/intel-06-4e-03/readme
+
+install -m 644 %{SOURCE21} %{buildroot}/usr/share/microcode_ctl/ucode_with_caveats/intel-06-5e-03/config
+install -m 644 %{SOURCE22} %{buildroot}/usr/share/microcode_ctl/ucode_with_caveats/intel-06-5e-03/readme
+
+# Install caveat readme files to the documentation directory as well
+install -m 644 "%{SOURCE9}" "%{SOURCE13}" "%{SOURCE16}" "%{SOURCE19}" "%{SOURCE22}" \
+	-t "%{buildroot}/%{_pkgdocdir}/caveats/"
+
+install -m 644 amd-ucode-2018-05-24/LICENSE.amd-ucode %{buildroot}/%{_pkgdocdir}/LICENSE.amd-ucode
 install -m 644 amd-ucode-2018-05-24/microcode_amd.bin %{buildroot}/lib/firmware/amd-ucode/microcode_amd.bin
 install -m 644 amd-ucode-2018-05-24/microcode_amd.bin.asc %{buildroot}/lib/firmware/amd-ucode/microcode_amd.bin.asc
 install -m 644 amd-ucode-2018-05-24/microcode_amd_fam15h.bin %{buildroot}/lib/firmware/amd-ucode/microcode_amd_fam15h.bin
@@ -151,7 +187,7 @@ rm -rf %{buildroot}
 /sbin/microcode_ctl
 /usr/libexec/microcode_ctl
 /usr/share/microcode_ctl
-%doc LICENSE.amd-ucode LICENSE.intel-ucode RELEASE_NOTES.intel-ucode README.caveats
+%doc %{_pkgdocdir}
 %attr(0644,root,root) %{_mandir}/*/*
 
 %triggerun -- microcode_ctl < 1:1.17-4
@@ -159,6 +195,18 @@ rm -rf %{buildroot}
 exit 0
 
 %changelog
+* Wed Jun 17 2020 Eugene Syromiatnikov <esyr@redhat.com> - 2:1.17-33.29
+- Update Intel CPU microcode to microcode-20200609 release (#1826590):
+  - Fixed a typo in the release note file.
+
+* Wed Jun 17 2020 Eugene Syromiatnikov <esyr@redhat.com> - 2:1.17-33.28
+- Enable 06-55-04 (SKL-X/W) caveat by default.
+- Enable 06-2d-07 (SNB-E/EN/EP) caveat by default (#1846024).
+
+* Wed Jun 17 2020 Eugene Syromiatnikov <esyr@redhat.com> - 2:1.17-33.27
+- Do not update 06-4e-03 (SKL-U/Y) and 06-5e-03 (SKL-H/S/Xeon E3 v5) to revision
+  0xdc, use 0xd6 by default (#1846134).
+
 * Wed Jun 03 2020 Eugene Syromiatnikov <esyr@redhat.com> - 2:1.17-33.26
 - Update Intel CPU microcode to microcode-20200602 release, addresses
   CVE-2020-0543, CVE-2020-0548, CVE-2020-0549 (#1795353, #1795357, #1827186):

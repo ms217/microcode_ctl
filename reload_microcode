@@ -18,7 +18,9 @@ get_model_string()
 
 CFG_BDW=intel-06-4f-01
 CFG_SNB=intel-06-2d-07
-CFG_SKL=intel-06-55-04
+CFG_SKL_SP=intel-06-55-04
+CFG_SKL_UY=intel-06-4e-03
+CFG_SKL_HS=intel-06-5e-03
 CHECK_CAVEATS=/usr/libexec/microcode_ctl/check_caveats
 MC_FILE=/lib/firmware/microcode.dat
 
@@ -51,14 +53,40 @@ fi
 
 # Skylake-SP/W/X check
 if [ "x${model}" = "xGenuineIntel 06-55-04" ]; then
-	cc_out=$("$CHECK_CAVEATS" -m -c "$CFG_SKL" || :)
+	cc_out=$("$CHECK_CAVEATS" -m -c "$CFG_SKL_SP" || :)
 
 	# Check that the configuration hasn't been skipped
 	ok_cfgs=$(printf "%s" "$cc_out" | sed -n 's/^ok_cfgs //p')
 
 	# Contrary to BDW caveat, we have a fallback in microcode.dat
-	[ "x$ok_cfgs" != "x$CFG_SKL" ] || {
+	[ "x$ok_cfgs" != "x$CFG_SKL_SP" ] || {
 		MC_FILE=/lib/firmware/microcode-06-55-04.dat
+	}
+fi
+
+# Skylake-U/Y check
+if [ "x${model}" = "xGenuineIntel 06-4e-03" ]; then
+	cc_out=$("$CHECK_CAVEATS" -m -c "$CFG_SKL_UY" || :)
+
+	# Check that the configuration hasn't been skipped
+	ok_cfgs=$(printf "%s" "$cc_out" | sed -n 's/^ok_cfgs //p')
+
+	# Contrary to BDW caveat, we have a fallback in microcode.dat
+	[ "x$ok_cfgs" != "x$CFG_SKL_UY" ] || {
+		MC_FILE=/lib/firmware/microcode-06-4e-03.dat
+	}
+fi
+
+# Skylake-H/S/Xeon E3 v5 check
+if [ "x${model}" = "xGenuineIntel 06-5e-03" ]; then
+	cc_out=$("$CHECK_CAVEATS" -m -c "$CFG_SKL_HS" || :)
+
+	# Check that the configuration hasn't been skipped
+	ok_cfgs=$(printf "%s" "$cc_out" | sed -n 's/^ok_cfgs //p')
+
+	# Contrary to BDW caveat, we have a fallback in microcode.dat
+	[ "x$ok_cfgs" != "x$CFG_SKL_HS" ] || {
+		MC_FILE=/lib/firmware/microcode-06-5e-03.dat
 	}
 fi
 

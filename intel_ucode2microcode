@@ -3,7 +3,7 @@
 indir=${1-intel-ucode}
 outfile=${2-microcode.dat}
 
-echo "Generationg $outfile..." >&2
+echo "Generating $outfile..." >&2
 
 IFS=$'\n';
 printf "" > "$outfile"
